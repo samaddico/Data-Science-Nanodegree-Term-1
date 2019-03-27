@@ -33,11 +33,11 @@ def load_data(data_dir):
     trainloader = torch.utils.data.DataLoader(train_data, batch_size=64, shuffle=True)
     validloader = torch.utils.data.DataLoader(valid_data, batch_size=64, shuffle=True)
     testloader = torch.utils.data.DataLoader(test_data, batch_size=64, shuffle=True)
-    
+
     return trainloader, validloader, testloader
 
 def load_checkpoint(filepath, arch, learning_rate, hidden_units):
-    
+
     # Load checkpoint based on gpu or cpu
     if torch.cuda.is_available():
         checkpoint = torch.load(filepath)
@@ -53,7 +53,7 @@ def load_checkpoint(filepath, arch, learning_rate, hidden_units):
 
     for param in model.parameters():
         param.requires_grad = False
-    
+
     # Initializes classifier based on user input of hidden units
     model.fc = checkpoint['fc']
     model.fc[0].out_features = hidden_units
@@ -64,22 +64,22 @@ def load_checkpoint(filepath, arch, learning_rate, hidden_units):
     model.idx_to_class = checkpoint['idx_to_class']
     model.cat_to_name = checkpoint['cat_to_name']
     #model.optimizer = checkpoint['optimizer']
-    
+
     model.to(device)
     model.optimizer = optim.Adam(model.fc.parameters(), lr = learning_rate)
     model.epochs = checkpoint['epochs']
-    
+
     print()
     print("Successfully loaded {} with {} hidden units and a learning rate of {}".format(arch, hidden_units, learning_rate))
     print()
-    
+
     return model
 
 def train(trainloader, validloader, epochs):
-    
+
     criterion = nn.NLLLoss()
     batch_print = 25
-    
+
     for e in range(epochs):
         # Initialize batch and training loss to 0 for epochs
         batch = 0
@@ -127,7 +127,7 @@ def train(trainloader, validloader, epochs):
 
     print("Training Complete!")
     print()
-    
+
 def save_model(save_dir):
     checkpoint = {'arch': arch,
                   'epochs': epochs + model.epochs,
@@ -140,7 +140,7 @@ def save_model(save_dir):
                   'cat_to_name': cat_to_name
                  }
     torch.save(checkpoint, save_dir + 'checkpoint.pth')
-                
+
 parser = argparse.ArgumentParser(description='Trains model using a directory of flowers.')
 parser.add_argument('train', help="Input directory for training/validating data.")
 parser.add_argument('--save_dir', help="Input save directory.")
@@ -158,7 +158,7 @@ epochs = args.epochs
 hidden_units = args.hidden_units
 learning_rate = args.learning_rate
 
-device = torch.device('cuda' if (torch.cuda.is_available()) else 'cpu')  # and args.gpu
+device = torch.device('cuda' if (torch.cuda.is_available() and args.gpu) else 'cpu')
 model = load_checkpoint('checkpoint.pth', arch, learning_rate, hidden_units)
 
 trainloader, validloader, testloader = load_data(data_dir)
