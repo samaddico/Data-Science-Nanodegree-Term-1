@@ -33,53 +33,63 @@ def load_data(data_dir):
     trainloader = torch.utils.data.DataLoader(train_data, batch_size=64, shuffle=True)
     validloader = torch.utils.data.DataLoader(valid_data, batch_size=64, shuffle=True)
     testloader = torch.utils.data.DataLoader(test_data, batch_size=64, shuffle=True)
-
+    
     return trainloader, validloader, testloader
 
-def load_checkpoint(filepath, arch, learning_rate, hidden_units):
-
-    # Load checkpoint based on gpu or cpu
-    if torch.cuda.is_available():
-        checkpoint = torch.load(filepath)
-    else: checkpoint = torch.load(filepath, map_location=lambda storage, loc: storage)
-
+def load_model(arch, learning_rate, hidden_units):
+    
     # Loads three differnt Resnet Models
-    if arch == "resnet50":
-        model = models.resnet50(pretrained = True)
-    elif arch == "resnet152":
-        model = models.resnet152(pretrained = True)
+    if arch == "densenet121":
+        model = models.densenet121(pretrained = True)
+    elif arch == "vgg16":
+        model = models.vgg16(pretrained = True)
     else:
         model = models.resnet101(pretrained = True)
 
     for param in model.parameters():
         param.requires_grad = False
-
+    
     # Initializes classifier based on user input of hidden units
-    model.fc = checkpoint['fc']
-    model.fc[0].out_features = hidden_units
-    model.fc[3].in_features = hidden_units
+    if arch == "densenet121":
+        model.classifier = nn.Sequential(nn.Linear(1024, hidden_units),
+                                 nn.ReLU(),
+                                 nn.Dropout(0.2),
+                                 nn.Linear(hidden_units, 102),
+                                 nn.LogSoftmax(dim=1))    
+    elif arch == "vgg16":
+        model.classifier = nn.Sequential(nn.Linear(25088, 4096),
+                                 nn.ReLU(),
+                                 nn.Dropout(0.5),
+                                 nn.Linear(4096, hidden_units),
+                                 nn.ReLU(),
+                                 nn.Dropout(0.5),
+                                 nn.Linear(hidden_units, 102),
+                                 nn.LogSoftmax(dim=1))        
+    else:
+        model.fc = nn.Sequential(nn.Linear(2048, hidden_units),
+                                 nn.ReLU(),
+                                 nn.Dropout(0.2),
+                                 nn.Linear(hidden_units, 102),
+                                 nn.LogSoftmax(dim=1))
 
     # Loads other presaved data
-    model.load_state_dict(checkpoint['state_dict'], strict = False)
-    model.idx_to_class = checkpoint['idx_to_class']
-    model.cat_to_name = checkpoint['cat_to_name']
-    #model.optimizer = checkpoint['optimizer']
-
-    model.to(device)
-    model.optimizer = optim.Adam(model.fc.parameters(), lr = learning_rate)
-    model.epochs = checkpoint['epochs']
+    model.criterion = nn.NLLLoss()
+    if arch == "resnet101":
+        model.optimizer = optim.Adam(model.fc.parameters(), lr = learning_rate)
+    else:
+        model.optimizer = optim.Adam(model.classifier.parameters(), lr = learning_rate)
 
     print()
-    print("Successfully loaded {} with {} hidden units and a learning rate of {}".format(arch, hidden_units, learning_rate))
+    print("Successfully loaded {} with {} hidden units and a learning rate of {}.".format(arch, hidden_units, learning_rate))
     print()
-
+    
     return model
 
 def train(trainloader, validloader, epochs):
-
-    criterion = nn.NLLLoss()
+    
     batch_print = 25
-
+    model.to(device)
+    
     for e in range(epochs):
         # Initialize batch and training loss to 0 for epochs
         batch = 0
@@ -92,7 +102,7 @@ def train(trainloader, validloader, epochs):
             images, labels = images.to(device), labels.to(device)
             # Output and Loss
             output = model.forward(images)
-            loss = criterion(output, labels)
+            loss = model.criterion(output, labels)
             training_loss += loss.item()
             #Autograde
             model.optimizer.zero_grad()
@@ -111,7 +121,7 @@ def train(trainloader, validloader, epochs):
                         images, labels = images.to(device), labels.to(device)
                         # Output and Loss
                         prediction = model.forward(images)
-                        valid_loss += criterion(prediction, labels).item()
+                        valid_loss += model.criterion(prediction, labels).item()
                         # Calculating accuracy
                         probabilities = torch.exp(prediction)
                         top_prob, top_class = probabilities.topk(1, dim = 1)
@@ -119,7 +129,7 @@ def train(trainloader, validloader, epochs):
                         accuracy += torch.mean(equals.type(torch.FloatTensor)).item()
 
                 # Printing results every 25 batches
-                print(f'Epoch {e+1+model.epochs} Batch {batch} - '
+                print(f'Epoch {e+1} Batch {batch} - '
                       f'Training Loss: {training_loss/batch:.3F}, '
                       f'Validate Loss: {valid_loss/len(validloader):.3F}, '
                       f'Validate Accuracy: {accuracy*100/len(validloader):.1F}%')
@@ -127,24 +137,29 @@ def train(trainloader, validloader, epochs):
 
     print("Training Complete!")
     print()
-
+    
 def save_model(save_dir):
+    if arch == "resent101":
+        classifer = model.fc
+        state_dict = model.fc.state_dict()
+    else:
+        classifier = model.classifier
+        state_dict = model.fc.state_dict()
+    idx_to_class = dict(map(reversed, model.class_to_idx.items()))
     checkpoint = {'arch': arch,
-                  'epochs': epochs + model.epochs,
-                  'input_size': 2048,
-                  'output_size': 102,
-                  'fc': model.fc,
-                  'state_dict': model.fc.state_dict(),
+                  'epochs': epochs,
+                  'hidden_units': hidden_units,
+                  'classifier': classifier,
+                  'state_dict': state_dict,
                   'optimizer': model.optimizer,
                   'idx_to_class': idx_to_class,
-                  'cat_to_name': cat_to_name
                  }
     torch.save(checkpoint, save_dir + 'checkpoint.pth')
-
+                
 parser = argparse.ArgumentParser(description='Trains model using a directory of flowers.')
 parser.add_argument('train', help="Input directory for training/validating data.")
 parser.add_argument('--save_dir', help="Input save directory.")
-parser.add_argument('--arch', choices=['resnet50', 'resnet101', 'resnet150'], default='resnet101', help="Returns the top K likely flower names with their probability.")
+parser.add_argument('--arch', choices=['vgg16', 'resnet101', 'densenet121'], default='resnet101', help="Choose between either vgg-16, resnet-101, or densenet-121 models to train on - default resnet101.")
 parser.add_argument('--learning_rate', type=float, default=0.03, help="Enter the learning rate - default 0.03.")
 parser.add_argument('--hidden_units', type=int, default=512, help="Enter the number of hiddlen units - default 512.")
 parser.add_argument('--epochs', type=int, default=1, help="Enter number of additional epochs.")
@@ -159,7 +174,7 @@ hidden_units = args.hidden_units
 learning_rate = args.learning_rate
 
 device = torch.device('cuda' if (torch.cuda.is_available() and args.gpu) else 'cpu')
-model = load_checkpoint('checkpoint.pth', arch, learning_rate, hidden_units)
+model = load_model(arch, learning_rate, hidden_units)
 
 trainloader, validloader, testloader = load_data(data_dir)
 train(trainloader, validloader, epochs)

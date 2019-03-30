@@ -3,6 +3,7 @@ import torch
 from torchvision import models
 import numpy as np
 from PIL import Image
+import json
 
 
 def load_checkpoint(filepath):
@@ -63,12 +64,14 @@ def predict(image_path, model, topk):
     ''' Predict the class (or classes) of an image using a trained deep learning model.
     '''
     model.eval()
+    model.to(device)
 
     # Processing the image
     image = process_image(image_path)
     img = torch.tensor(image).float()
     img = img.unsqueeze(0)
-
+    img.to(device)
+    
     with torch.no_grad():
         
         prediction = model.forward(img)
@@ -86,7 +89,7 @@ def predict(image_path, model, topk):
 
     return top_prob, top_class
     
-
+    
 def print_cat(top_prob, top_class):
     print()
     for idx, prob in np.nditer([top_class, top_prob]):
@@ -99,14 +102,21 @@ parser = argparse.ArgumentParser(description='Process flower images.')
 parser.add_argument('checkpoint', help="Returns the top flower name and class probability.")
 parser.add_argument('--top_k', type=int, default=1, help="Returns the top K likely flower names with their probability.")
 parser.add_argument('--gpu', action="store_true", help="Utilizes gpu instead of cpu.")
+parser.add_argument('--category_names', help="Enter a json that maps classes to categories.")
 
 args = parser.parse_args()
 
 image_path = args.checkpoint
 k = args.top_k
+             
+# Load json if available             
+cat_names = args.category_names
 
 device = torch.device('cuda' if (torch.cuda.is_available() and args.gpu) else 'cpu')
 model = load_checkpoint('checkpoint.pth')
+if (cat_names != None):
+    with open(cat_names, 'r') as f:
+        model.cat_to_name = json.load(f)
 
 top_prob, top_cat = predict(image_path, model, k)
 print_cat(top_prob, top_cat)
